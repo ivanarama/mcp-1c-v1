@@ -1,4 +1,4 @@
-# MCP 1C Vector Database Project
+# MCP сервер с RAG описанием структуры конфигурации 1С
 
 Проект состоит из трех сервисов для работы с векторной базой данных на основе документации 1C:
 
@@ -81,7 +81,7 @@ mcp-1c-v1/
 Для агентов (Cursor, RooCode) поддерживающих современный протокол Streamable HTTP, указываем: http://youaddress:8000/mcp
 Для VSCode Copilot, хоть и заявлена поддержка Streamable HTTP, но у меня работает только как SSE, поэтому указывал: http://youraddress:8000/mcp/sse
 
-**Для Copilot .../YourProject/.vscode/mcp.json**
+**Для VSCode Copilot .../YourProject/.vscode/mcp.json**
 ```json
 {
     "servers": {
