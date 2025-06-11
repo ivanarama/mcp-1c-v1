@@ -1,0 +1,28 @@
+"""
+Configuration file for MCP RAG Server
+"""
+import os
+
+# Qdrant settings
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "1c_rag")
+
+# Embedding service settings
+EMBEDDING_SERVICE_URL = os.getenv(
+    "EMBEDDING_SERVICE_URL", "http://localhost:5000")
+
+# Server settings
+SERVER_NAME = os.getenv("SERVER_NAME", "MCP 1C RAG Server")
+SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
+SERVER_PORT = int(os.getenv("SERVER_PORT", "9000"))
+
+# RAG settings
+DEFAULT_SEARCH_LIMIT = int(os.getenv("DEFAULT_SEARCH_LIMIT", "5"))
+MAX_SEARCH_LIMIT = int(os.getenv("MAX_SEARCH_LIMIT", "10"))
+MIN_SEARCH_LIMIT = int(os.getenv("MIN_SEARCH_LIMIT", "1"))
+
+# Request timeout settings
+EMBEDDING_REQUEST_TIMEOUT = int(os.getenv("EMBEDDING_REQUEST_TIMEOUT", "10"))
+HEALTH_CHECK_TIMEOUT = int(os.getenv("HEALTH_CHECK_TIMEOUT", "5"))
+SSE_PING_INTERVAL = float(os.getenv("SSE_PING_INTERVAL", "30.0"))

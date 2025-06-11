@@ -1,0 +1,6 @@
+sentence-transformers
+einops
+fastapi
+uvicorn[standard]
+torch
+numpy

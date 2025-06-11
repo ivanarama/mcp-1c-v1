@@ -1,0 +1,21 @@
+{
+    "model": {
+        "name": "Qwen/Qwen3-Embedding-0.6B",
+        "trust_remote_code": true,
+        "default_task": "retrieval.passage"
+    },
+    "models_info": {
+        "all-MiniLM-L6-v2": {
+            "dimensions": 384,
+            "supports_task": false
+        },
+        "jinaai/jina-embeddings-v3": {
+            "dimensions": 1024,
+            "supports_task": true
+        },
+        "Qwen/Qwen3-Embedding-0.6B": {
+            "dimensions": 1024,
+            "supports_task": false
+        }
+    }
+}

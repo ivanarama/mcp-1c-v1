@@ -1,0 +1,5 @@
+einops
+qdrant-client
+pandas
+streamlit
+requests

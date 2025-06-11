@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  embedding-service:
+    build: .
+    container_name: embedding-service
+    ports:
+      - "5000:5000"
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount config for easy updates without rebuild
+      - ./config.json:/app/config.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s # Longer start period for model loading
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G

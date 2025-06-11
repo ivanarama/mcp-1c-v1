@@ -1,0 +1,4 @@
+fastmcp
+starlette
+qdrant-client
+requests
