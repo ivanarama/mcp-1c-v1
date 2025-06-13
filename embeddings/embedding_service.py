@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, LoggingHandler
 import logging
 import json
 import os
@@ -11,7 +11,8 @@ app = FastAPI(title="Configurable Embeddings Service",
               description="API for generating embeddings with configurable models")
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG, handlers=[LoggingHandler()])
 logger = logging.getLogger(__name__)
 
 # Load configuration
