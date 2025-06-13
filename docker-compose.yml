@@ -28,6 +28,9 @@ services:
     container_name: embedding-service
     ports:
       - "5000:5000"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./models:/root/.cache/huggingface/hub
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://embedding-service:5000/health" ]
       interval: 30s
