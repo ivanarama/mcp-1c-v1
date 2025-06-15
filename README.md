@@ -3,6 +3,8 @@
 Демонстрация запуска и использования на Youtube:
 [![Демонстрация запуска и использования MCP сервера для разработки 1С](https://i.ytimg.com/vi/74kYcK6bvGk/sd3.jpg)](http://www.youtube.com/watch?v=74kYcK6bvGk)
 
+[**Подробнее в статье**](https://github.com/FSerg/mcp-1c-v1/blob/main/article/article.md    ).
+
 Проект состоит из нескольких сервисов для работы с векторной базой данных на основе документации 1C:
 
 1. **Embedding Service** - сервис генерации векторных представлений
