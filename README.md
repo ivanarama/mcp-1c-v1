@@ -92,6 +92,9 @@ mcp-1c-v1/
 {
     "servers": {
         "my-1c-mcp-server": {
+            "headers": {
+                "x-collection-name": "my_vector_table"
+            },
             "url": "http://youraddress:8000/mcp/sse"
         }
     }
@@ -103,12 +106,15 @@ mcp-1c-v1/
 {
     "servers": {
         "my-1c-mcp-server": {
+            "headers": {
+                "x-collection-name": "my_vector_table"
+            }
             "url": "http://youraddress:8000/mcp"
         }
     }
 }
 ```
-
+Через заголовок `x-collection-name` можно указать имя коллекции в Qdrant вместо дефолтного `1c_rag`. Т.к. настройки MCP почти везде можно указывать на уровне проекта, то это позволяет один и тот же инстанс MCP сервера использовать для разных проектов с разными коллекциями (для разных конфигураций 1С).
 
 ## Переменные окружения
 
@@ -117,7 +123,7 @@ mcp-1c-v1/
 - `EMBEDDING_SERVICE_URL` - URL сервиса эмбеддингов (по умолчанию: http://localhost:5000)
 - `QDRANT_HOST` - хост Qdrant (по умолчанию: localhost)
 - `QDRANT_PORT` - порт Qdrant (по умолчанию: 6333)
-- `COLLECTION_NAME` - имя коллекции в Qdrant (по умолчанию: 1c_rag)
+- `COLLECTION_NAME` - имя коллекции в Qdrant (по умолчанию: 1c_rag), который может быть переопределено в заголовке `x-collection-name` в настройках подключения MCP сервера
 - `ROW_BATCH_SIZE` - размер батча строк (по умолчанию: 250)
 - `EMBEDDING_BATCH_SIZE` - размер батча эмбеддингов (по умолчанию: 50)
 

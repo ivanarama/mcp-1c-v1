@@ -1,4 +1,5 @@
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 import json
@@ -59,7 +60,7 @@ def get_query_embedding(query: str) -> List[float]:
         raise Exception(f"Ошибка получения эмбеддинга: {str(e)}")
 
 
-def rag_search(query: str, object_type: str = None, limit: int = DEFAULT_SEARCH_LIMIT) -> List[Dict[str, Any]]:
+def rag_search(query: str, collection_name: str, object_type: str = None, limit: int = DEFAULT_SEARCH_LIMIT) -> List[Dict[str, Any]]:
     """Выполнение RAG-поиска в документации 1С"""
     try:
         # Получение эмбеддинга для запроса
@@ -81,7 +82,7 @@ def rag_search(query: str, object_type: str = None, limit: int = DEFAULT_SEARCH_
 
         # Поиск в Qdrant
         search_results = qdrant_client.query_points(
-            collection_name=COLLECTION_NAME,
+            collection_name=collection_name,
             query=query_embedding,
             query_filter=query_filter,
             limit=limit
@@ -110,17 +111,35 @@ def search_1c_documentation(search_params: SearchRequest) -> str:
         search_params: Параметры поиска включающие запрос, тип объекта и лимит результатов
     """
     try:
-        results = rag_search(search_params.query,
-                             search_params.object_type, search_params.limit)
+
+        headers = get_http_headers()
+        # Определяем имя коллекции по приоритету:
+        # 1. Из HTTP-заголовка x-collection-name
+        # 2. Значение по умолчанию из конфигурации
+        collection_name = (
+            headers.get("x-collection-name") or
+            COLLECTION_NAME
+        )
+
+        # Проверяем, что коллекция существует
+        if not qdrant_client.collection_exists(collection_name):
+            return f"Ошибка: коллекция '{collection_name}' не существует в Qdrant."
+
+        results = rag_search(
+            search_params.query,
+            collection_name,
+            search_params.object_type,
+            search_params.limit
+        )
 
         if not results:
             filter_text = f" по типу '{search_params.object_type}'" if search_params.object_type else ""
-            return f"По запросу '{search_params.query}'{filter_text} ничего не найдено в документации 1С."
+            return f"По запросу '{search_params.query}'{filter_text} ничего не найдено в документации 1С (коллекция: {collection_name})."
 
         formatted_results = []
         filter_text = f" (фильтр по типу: {search_params.object_type})" if search_params.object_type else ""
         formatted_results.append(
-            f"Результаты поиска по запросу: '{search_params.query}'{filter_text}\n")
+            f"Результаты поиска по запросу: '{search_params.query}'{filter_text} (коллекция: {collection_name})\n")
 
         for i, result in enumerate(results, 1):
             formatted_results.append(
@@ -182,9 +201,24 @@ async def manual_search(request: Request) -> JSONResponse:
         # Валидация данных через Pydantic модель
         search_request = SearchRequest(**req_data)
 
+        # Определяем имя коллекции по приоритету:
+        # 1. Из HTTP-заголовка x-collection-name
+        # 2. Значение по умолчанию из конфигурации
+        collection_name = (
+            request.headers.get("x-collection-name") or
+            COLLECTION_NAME
+        )
+
+        # Проверяем, что коллекция существует
+        if not qdrant_client.collection_exists(collection_name):
+            return JSONResponse({
+                "error": f"Коллекция '{collection_name}' не существует в Qdrant."
+            }, status_code=400)
+
         # Выполнение поиска
         results = rag_search(
             query=search_request.query,
+            collection_name=collection_name,
             object_type=search_request.object_type,
             limit=search_request.limit
         )
@@ -192,6 +226,7 @@ async def manual_search(request: Request) -> JSONResponse:
         return JSONResponse({
             "query": search_request.query,
             "object_type": search_request.object_type,
+            "collection_name": collection_name,
             "limit": search_request.limit,
             "results_count": len(results),
             "results": results
