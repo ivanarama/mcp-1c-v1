@@ -93,7 +93,7 @@ mcp-1c-v1/
     "servers": {
         "my-1c-mcp-server": {
             "headers": {
-                "x-collection-name": "my_vector_table"
+                "x-collection-name": "my_vector_collection"
             },
             "url": "http://youraddress:8000/mcp/sse"
         }
@@ -107,8 +107,8 @@ mcp-1c-v1/
     "servers": {
         "my-1c-mcp-server": {
             "headers": {
-                "x-collection-name": "my_vector_table"
-            }
+                "x-collection-name": "my_vector_collection"
+            },
             "url": "http://youraddress:8000/mcp"
         }
     }
@@ -120,7 +120,7 @@ mcp-1c-v1/
 
 Можно настроить через переменные окружения:
 
-- `EMBEDDING_SERVICE_URL` - URL сервиса эмбеддингов (по умолчанию: http://localhost:5000)
+- `EMBEDDING_SERVICE_URL` - URL сервиса эмбеддингов (по умолчанию: http://youraddress:5000)
 - `QDRANT_HOST` - хост Qdrant (по умолчанию: localhost)
 - `QDRANT_PORT` - порт Qdrant (по умолчанию: 6333)
 - `COLLECTION_NAME` - имя коллекции в Qdrant (по умолчанию: 1c_rag), который может быть переопределено в заголовке `x-collection-name` в настройках подключения MCP сервера
