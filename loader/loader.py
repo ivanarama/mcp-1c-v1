@@ -147,7 +147,7 @@ def generate_embeddings_batch(texts, batch_info_text, embedding_progress_bar):
     return all_embeddings
 
 
-def upload_to_qdrant(embeddings, texts, metadatas, client):
+def upload_to_qdrant(embeddings, texts, metadatas, client, collection_name):
     """Загрузка в Qdrant"""
     points = [
         PointStruct(
@@ -162,12 +162,12 @@ def upload_to_qdrant(embeddings, texts, metadatas, client):
     ]
 
     client.upsert(
-        collection_name=COLLECTION_NAME,
+        collection_name=collection_name,
         points=points
     )
 
 
-def process_files(zip_file):
+def process_files(zip_file, collection_name):
     """Основная функция обработки файлов"""
     temp_dir = None
     try:
@@ -208,18 +208,18 @@ def process_files(zip_file):
         DIMENSIONS = embedding_info.get('dimensions', 384)
 
         # Проверка и пересоздание коллекции
-        if client.collection_exists(COLLECTION_NAME):
-            collection_info = client.get_collection(COLLECTION_NAME)
+        if client.collection_exists(collection_name):
+            collection_info = client.get_collection(collection_name)
             if collection_info.points_count > 0:
                 st.write(
-                    f"Удаление существующей коллекции {COLLECTION_NAME} с {collection_info.points_count} записями...")
-                client.delete_collection(COLLECTION_NAME)
+                    f"Удаление существующей коллекции {collection_name} с {collection_info.points_count} записями...")
+                client.delete_collection(collection_name)
                 st.write("Коллекция удалена.")
 
-        if not client.collection_exists(COLLECTION_NAME):
-            st.write(f"Создание новой коллекции {COLLECTION_NAME}...")
+        if not client.collection_exists(collection_name):
+            st.write(f"Создание новой коллекции {collection_name}...")
             client.create_collection(
-                collection_name=COLLECTION_NAME,
+                collection_name=collection_name,
                 vectors_config=VectorParams(
                     size=DIMENSIONS,
                     distance=Distance.COSINE,
@@ -287,14 +287,15 @@ def process_files(zip_file):
                 return False
 
             # Загрузка в Qdrant
-            upload_to_qdrant(embeddings, texts, metadatas, client)
+            upload_to_qdrant(embeddings, texts, metadatas,
+                             client, collection_name)
 
             total_points_processed += len(texts)
 
             time.sleep(1)
 
         st.success(
-            f"Обработка завершена! Всего загружено {total_points_processed} записей в коллекцию {COLLECTION_NAME}")
+            f"Обработка завершена! Всего загружено {total_points_processed} записей в коллекцию {collection_name}")
         return True
 
     except Exception as e:
@@ -313,6 +314,18 @@ def main():
     st.title("Загрузка данных в Qdrant")
     st.write("Загрузите ZIP-архив с markdown файлами и файлом objects.csv")
 
+    # Поле для ввода имени коллекции
+    collection_name = st.text_input(
+        "Имя коллекции Qdrant",
+        value=COLLECTION_NAME,
+        help="Введите имя коллекции, в которую будут загружены данные"
+    )
+
+    # Проверяем, что имя коллекции не пустое
+    if not collection_name.strip():
+        st.error("Пожалуйста, введите имя коллекции")
+        collection_name = COLLECTION_NAME
+
     # Загрузка файлов
     zip_file = st.file_uploader(
         "Выберите ZIP архив",
@@ -324,9 +337,11 @@ def main():
     if st.button("Начать обработку", type="primary"):
         if zip_file is None:
             st.error("Пожалуйста, загрузите ZIP архив")
+        elif not collection_name.strip():
+            st.error("Пожалуйста, введите имя коллекции")
         else:
             with st.spinner("Обработка файлов..."):
-                success = process_files(zip_file)
+                success = process_files(zip_file, collection_name.strip())
                 if success:
                     st.balloons()
 
