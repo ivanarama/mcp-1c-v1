@@ -13,18 +13,8 @@ import requests
 import json
 from config import EMBEDDING_SERVICE_URL, COLLECTION_NAME, ROW_BATCH_SIZE, EMBEDDING_BATCH_SIZE, QDRANT_HOST, QDRANT_PORT
 
-# Параметры
-# COLLECTION_NAME = "1c_rag"  # Имя коллекции в Qdrant
-# EMBEDDING_SERVICE_URL = "http://localhost:5000"  # URL сервиса эмбеддингов
-# DIMENSIONS = 384  # Размерность эмбеддингов (берем из конфигурации сервиса)
-
-# Параметры батчинга
-# ROW_BATCH_SIZE = 250       # Обрабатывать строки CSV пачками по 250
-# EMBEDDING_BATCH_SIZE = 50  # Размер батча для эмбеддингов
 
 # Инициализация клиента Qdrant (кэширование в Streamlit)
-
-
 @st.cache_resource
 def get_qdrant_client():
     return QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
@@ -92,8 +82,9 @@ def load_markdown_content(file_path, base_path):
 
 
 def process_csv_batch(csv_rows, base_path):
-    """Обработка батча строк CSV"""
-    texts = []
+    """Обработка батча строк CSV с созданием двух векторов на объект"""
+    object_name_texts = []
+    friendly_name_texts = []
     metadatas = []
 
     for _, row in csv_rows.iterrows():
@@ -111,13 +102,18 @@ def process_csv_batch(csv_rows, base_path):
             "file_name": file_name
         }
 
-        # final_str = f"{object_name} (Синоним: {synonym})".strip()
-        # final_str = f"{object_type} ({synonym})"
-        final_str = f"{object_type.replace('.', ' ')} ({synonym})"
-        texts.append(final_str)
+        # Создаем два типа текстов для векторизации:
+        # 1. object_name - точное полное имя объекта как в терминах 1С
+        object_name_text = object_name
+
+        # 2. friendly_name - более удобное для чтения имя
+        friendly_name_text = f"{object_type}: {synonym}"
+
+        object_name_texts.append(object_name_text)
+        friendly_name_texts.append(friendly_name_text)
         metadatas.append(metadata)
 
-    return texts, metadatas
+    return object_name_texts, friendly_name_texts, metadatas
 
 
 def generate_embeddings_batch(texts, batch_info_text, embedding_progress_bar):
@@ -147,18 +143,25 @@ def generate_embeddings_batch(texts, batch_info_text, embedding_progress_bar):
     return all_embeddings
 
 
-def upload_to_qdrant(embeddings, texts, metadatas, client, collection_name):
-    """Загрузка в Qdrant"""
+def upload_to_qdrant(object_name_embeddings, friendly_name_embeddings, object_name_texts, friendly_name_texts, metadatas, client, collection_name):
+    """Загрузка в Qdrant с двумя типами векторов"""
     points = [
         PointStruct(
             id=str(uuid.uuid4()),
-            vector=embedding,  # Убираем .tolist() так как embeddings уже списки
+            vector={
+                "object_name": object_name_embedding,
+                "friendly_name": friendly_name_embedding
+            },
             payload={
-                "text": text,
+                # "object_name_text": object_name_text,
+                # "friendly_name_text": friendly_name_text,
+                "friendly_name": friendly_name_text,
                 **metadata
             }
         )
-        for embedding, text, metadata in zip(embeddings, texts, metadatas)
+        for object_name_embedding, friendly_name_embedding, object_name_text, friendly_name_text, metadata in
+        zip(object_name_embeddings, friendly_name_embeddings,
+            object_name_texts, friendly_name_texts, metadatas)
     ]
 
     client.upsert(
@@ -217,14 +220,22 @@ def process_files(zip_file, collection_name):
                 st.write("Коллекция удалена.")
 
         if not client.collection_exists(collection_name):
-            st.write(f"Создание новой коллекции {collection_name}...")
+            st.write(
+                f"Создание новой коллекции {collection_name} с поддержкой двух типов векторов...")
             client.create_collection(
                 collection_name=collection_name,
-                vectors_config=VectorParams(
-                    size=DIMENSIONS,
-                    distance=Distance.COSINE,
-                    on_disk=True
-                )
+                vectors_config={
+                    "object_name": VectorParams(
+                        size=DIMENSIONS,
+                        distance=Distance.COSINE,
+                        on_disk=True
+                    ),
+                    "friendly_name": VectorParams(
+                        size=DIMENSIONS,
+                        distance=Distance.COSINE,
+                        on_disk=True
+                    )
+                }
             )
             st.write("Коллекция создана.")
 
@@ -272,25 +283,37 @@ def process_files(zip_file, collection_name):
             overall_progress.progress(rows_processed / total_rows)
 
             # Обработка текста
-            texts, metadatas = process_csv_batch(row_batch, temp_dir)
+            object_name_texts, friendly_name_texts, metadatas = process_csv_batch(
+                row_batch, temp_dir)
 
-            if not texts:
+            if not object_name_texts:
                 st.warning("Нет текстов для обработки в этом батче")
                 continue
 
-            # Генерация эмбеддингов
-            embeddings = generate_embeddings_batch(
-                texts, batch_info_text, embedding_progress)
+            # Генерация эмбеддингов для object_name
+            object_name_embeddings = generate_embeddings_batch(
+                object_name_texts, batch_info_text, embedding_progress)
 
-            if embeddings is None:
-                st.error("Ошибка генерации эмбеддингов, прерываем обработку")
+            if object_name_embeddings is None:
+                st.error(
+                    "Ошибка генерации эмбеддингов для object_name, прерываем обработку")
+                return False
+
+            # Генерация эмбеддингов для friendly_name
+            friendly_name_embeddings = generate_embeddings_batch(
+                friendly_name_texts, batch_info_text, embedding_progress)
+
+            if friendly_name_embeddings is None:
+                st.error(
+                    "Ошибка генерации эмбеддингов для friendly_name, прерываем обработку")
                 return False
 
             # Загрузка в Qdrant
-            upload_to_qdrant(embeddings, texts, metadatas,
+            upload_to_qdrant(object_name_embeddings, friendly_name_embeddings,
+                             object_name_texts, friendly_name_texts, metadatas,
                              client, collection_name)
 
-            total_points_processed += len(texts)
+            total_points_processed += len(object_name_texts)
 
             time.sleep(1)
 

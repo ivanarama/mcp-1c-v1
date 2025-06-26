@@ -1,5 +1,8 @@
 # Конфигурация для loader
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 EMBEDDING_SERVICE_URL = os.getenv(
     "EMBEDDING_SERVICE_URL", "http://localhost:5000")

@@ -5,7 +5,7 @@ from starlette.responses import JSONResponse
 import json
 import requests
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter
+from qdrant_client.models import Filter, Prefetch, FusionQuery, Fusion
 from typing import Dict, Any, List, Literal
 from pydantic import BaseModel, Field
 
@@ -13,7 +13,8 @@ from config import (
     QDRANT_HOST, QDRANT_PORT, COLLECTION_NAME, EMBEDDING_SERVICE_URL,
     SERVER_HOST, SERVER_PORT, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT,
     MIN_SEARCH_LIMIT, SERVER_NAME,
-    EMBEDDING_REQUEST_TIMEOUT, HEALTH_CHECK_TIMEOUT
+    EMBEDDING_REQUEST_TIMEOUT, HEALTH_CHECK_TIMEOUT,
+    OBJECT_NAME_VECTOR, FRIENDLY_NAME_VECTOR, PREFETCH_LIMIT_MULTIPLIER
 )
 
 mcp = FastMCP(name=SERVER_NAME)
@@ -23,6 +24,30 @@ qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
 
 class SearchRequest(BaseModel):
+    """Модель запроса для поиска в документации 1С"""
+    query: str = Field(
+        description="Наименование объекта конфигурации или часть его имени для поиска в документации 1С",
+        min_length=1,
+        max_length=500
+    )
+    object_type: Literal["Справочник", "Документ", "РегистрСведений", "РегистрНакопления",
+                         "Константа", "Перечисление", "ПланВидовХарактеристик"] | None = Field(
+        default=None,
+        description="Фильтр по типу объекта конфигурации 1С. Если не указан, поиск выполняется по всем типам объектов"
+    )
+    limit: int = Field(
+        default=DEFAULT_SEARCH_LIMIT,
+        description=f"Максимальное количество результатов поиска (по умолчанию {DEFAULT_SEARCH_LIMIT})",
+        ge=MIN_SEARCH_LIMIT,
+        le=MAX_SEARCH_LIMIT
+    )
+    use_multivector: bool = Field(
+        default=True,
+        description="Использовать мультивекторный поиск с RRF для более точного ранжирования результатов"
+    )
+
+
+class SearchRequestMCP(BaseModel):
     """Модель запроса для поиска в документации 1С"""
     query: str = Field(
         description="Наименование объекта конфигурации или часть его имени для поиска в документации 1С",
@@ -60,8 +85,8 @@ def get_query_embedding(query: str) -> List[float]:
         raise Exception(f"Ошибка получения эмбеддинга: {str(e)}")
 
 
-def rag_search(query: str, collection_name: str, object_type: str = None, limit: int = DEFAULT_SEARCH_LIMIT) -> List[Dict[str, Any]]:
-    """Выполнение RAG-поиска в документации 1С"""
+def rag_search(query: str, collection_name: str, object_type: str = None, limit: int = DEFAULT_SEARCH_LIMIT, use_multivector: bool = True) -> List[Dict[str, Any]]:
+    """Выполнение RAG-поиска в документации 1С с поддержкой мультивекторного поиска"""
     try:
         # Получение эмбеддинга для запроса
         query_embedding = get_query_embedding(query)
@@ -80,13 +105,36 @@ def rag_search(query: str, collection_name: str, object_type: str = None, limit:
                 ]
             )
 
-        # Поиск в Qdrant
-        search_results = qdrant_client.query_points(
-            collection_name=collection_name,
-            query=query_embedding,
-            query_filter=query_filter,
-            limit=limit
-        )
+        if use_multivector:
+            # Мультивекторный поиск с RRF
+            search_results = qdrant_client.query_points(
+                collection_name=collection_name,
+                prefetch=[
+                    Prefetch(
+                        query=query_embedding,
+                        using=OBJECT_NAME_VECTOR,
+                        filter=query_filter,
+                        limit=limit * PREFETCH_LIMIT_MULTIPLIER
+                    ),
+                    Prefetch(
+                        query=query_embedding,
+                        using=FRIENDLY_NAME_VECTOR,
+                        filter=query_filter,
+                        limit=limit * PREFETCH_LIMIT_MULTIPLIER
+                    ),
+                ],
+                query=FusionQuery(fusion=Fusion.RRF),
+                limit=limit
+            )
+        else:
+            # Обычный поиск по одному вектору
+            search_results = qdrant_client.query_points(
+                collection_name=collection_name,
+                query=query_embedding,
+                using=FRIENDLY_NAME_VECTOR,  # Используем friendly_name как основной вектор
+                query_filter=query_filter,
+                limit=limit
+            )
 
         # Форматирование результатов
         results = []
@@ -104,7 +152,7 @@ def rag_search(query: str, collection_name: str, object_type: str = None, limit:
 
 
 @mcp.tool
-def search_1c_documentation(search_params: SearchRequest) -> str:
+def search_1c_documentation(search_params: SearchRequestMCP) -> str:
     """Поиск описания объектов конфигурации 1С Предприятие 8 в документации.
 
     Args:
@@ -125,21 +173,25 @@ def search_1c_documentation(search_params: SearchRequest) -> str:
         if not qdrant_client.collection_exists(collection_name):
             return f"Ошибка: коллекция '{collection_name}' не существует в Qdrant."
 
+        use_multivector = True
         results = rag_search(
             search_params.query,
             collection_name,
             search_params.object_type,
-            search_params.limit
+            search_params.limit,
+            use_multivector
         )
 
         if not results:
             filter_text = f" по типу '{search_params.object_type}'" if search_params.object_type else ""
-            return f"По запросу '{search_params.query}'{filter_text} ничего не найдено в документации 1С (коллекция: {collection_name})."
+            search_type = "мультивекторный" if use_multivector else "обычный"
+            return f"По запросу '{search_params.query}'{filter_text} ничего не найдено в документации 1С (коллекция: {collection_name}, поиск: {search_type})."
 
         formatted_results = []
         filter_text = f" (фильтр по типу: {search_params.object_type})" if search_params.object_type else ""
+        search_type = "мультивекторный (RRF)" if use_multivector else "обычный"
         formatted_results.append(
-            f"Результаты поиска по запросу: '{search_params.query}'{filter_text} (коллекция: {collection_name})\n")
+            f"Результаты поиска по запросу: '{search_params.query}'{filter_text} (коллекция: {collection_name}, поиск: {search_type})\n")
 
         for i, result in enumerate(results, 1):
             formatted_results.append(
@@ -220,7 +272,8 @@ async def manual_search(request: Request) -> JSONResponse:
             query=search_request.query,
             collection_name=collection_name,
             object_type=search_request.object_type,
-            limit=search_request.limit
+            limit=search_request.limit,
+            use_multivector=search_request.use_multivector
         )
 
         return JSONResponse({
@@ -228,6 +281,7 @@ async def manual_search(request: Request) -> JSONResponse:
             "object_type": search_request.object_type,
             "collection_name": collection_name,
             "limit": search_request.limit,
+            "use_multivector": search_request.use_multivector,
             "results_count": len(results),
             "results": results
         })

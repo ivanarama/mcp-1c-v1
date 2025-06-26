@@ -3,3 +3,4 @@ qdrant-client
 pandas
 streamlit
 requests
+python-dotenv

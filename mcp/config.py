@@ -1,7 +1,9 @@
-"""
-Configuration file for MCP RAG Server
-"""
+# Конфигурация для MCP сервера 1С RAG
+
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Qdrant settings
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
@@ -26,3 +28,10 @@ MIN_SEARCH_LIMIT = int(os.getenv("MIN_SEARCH_LIMIT", "1"))
 EMBEDDING_REQUEST_TIMEOUT = int(os.getenv("EMBEDDING_REQUEST_TIMEOUT", "10"))
 HEALTH_CHECK_TIMEOUT = int(os.getenv("HEALTH_CHECK_TIMEOUT", "5"))
 SSE_PING_INTERVAL = float(os.getenv("SSE_PING_INTERVAL", "30.0"))
+
+# Multivector search settings
+# Имена векторов в коллекции Qdrant (не настраиваются через переменные окружения)
+OBJECT_NAME_VECTOR = "object_name"
+FRIENDLY_NAME_VECTOR = "friendly_name"
+# Множитель для prefetch лимита в мультивекторном поиске
+PREFETCH_LIMIT_MULTIPLIER = int(os.getenv("PREFETCH_LIMIT_MULTIPLIER", "3"))
