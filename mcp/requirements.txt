@@ -2,3 +2,4 @@ fastmcp
 starlette
 qdrant-client
 requests
+python-dotenv
