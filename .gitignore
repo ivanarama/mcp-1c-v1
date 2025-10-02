@@ -129,3 +129,6 @@ secrets.json
 # MCP specific
 *.mcp
 mcp-data/
+qdrant_storage/
+embeddings/
+embeddings/models/
