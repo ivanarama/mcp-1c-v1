@@ -249,6 +249,7 @@ async def manual_search(request: Request) -> JSONResponse:
     """REST endpoint для ручного тестирования поиска"""
     try:
         req_data = await request.json()
+        print(req_data)
 
         # Валидация данных через Pydantic модель
         search_request = SearchRequest(**req_data)

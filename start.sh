@@ -8,7 +8,7 @@ echo "🚀 Запуск всех сервисов..."
 docker network create mcp-network 2>/dev/null || true
 
 # Запуск всех сервисов
-docker-compose up --build -d
+docker compose up --build -d
 
 echo "✅ Все сервисы запущены!"
 echo ""

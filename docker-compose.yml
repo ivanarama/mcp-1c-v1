@@ -62,7 +62,7 @@ services:
     build: ./mcp
     container_name: mcp-server
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       - EMBEDDING_SERVICE_URL=http://embedding-service:5000
       - QDRANT_HOST=qdrant
