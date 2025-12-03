@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8001
 
 # Health check
 # HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

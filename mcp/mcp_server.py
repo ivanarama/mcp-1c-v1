@@ -14,7 +14,8 @@ from config import (
     SERVER_HOST, SERVER_PORT, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT,
     MIN_SEARCH_LIMIT, SERVER_NAME,
     EMBEDDING_REQUEST_TIMEOUT, HEALTH_CHECK_TIMEOUT,
-    OBJECT_NAME_VECTOR, FRIENDLY_NAME_VECTOR, PREFETCH_LIMIT_MULTIPLIER
+    OBJECT_NAME_VECTOR, FRIENDLY_NAME_VECTOR, PREFETCH_LIMIT_MULTIPLIER,
+    TRANSPORT_TYPE
 )
 
 mcp = FastMCP(name=SERVER_NAME)
@@ -152,11 +153,13 @@ def rag_search(query: str, collection_name: str, object_type: str = None, limit:
 
 
 @mcp.tool
-def search_1c_documentation(search_params: SearchRequestMCP) -> str:
+def search_1c_documentation(query: str, object_type: str = None, limit: int = DEFAULT_SEARCH_LIMIT) -> str:
     """Поиск описания объектов конфигурации 1С Предприятие 8 в документации.
 
     Args:
-        search_params: Параметры поиска включающие запрос, тип объекта и лимит результатов
+        query: Наименование объекта конфигурации или часть его имени для поиска в документации 1С
+        object_type: Фильтр по типу объекта конфигурации 1С (Справочник, Документ, РегистрСведений, РегистрНакопления, Константа, Перечисление, ПланВидовХарактерик)
+        limit: Максимальное количество результатов поиска
     """
     try:
 
@@ -175,23 +178,23 @@ def search_1c_documentation(search_params: SearchRequestMCP) -> str:
 
         use_multivector = True
         results = rag_search(
-            search_params.query,
+            query,
             collection_name,
-            search_params.object_type,
-            search_params.limit,
+            object_type,
+            limit,
             use_multivector
         )
 
         if not results:
-            filter_text = f" по типу '{search_params.object_type}'" if search_params.object_type else ""
+            filter_text = f" по типу '{object_type}'" if object_type else ""
             search_type = "мультивекторный" if use_multivector else "обычный"
-            return f"По запросу '{search_params.query}'{filter_text} ничего не найдено в документации 1С (коллекция: {collection_name}, поиск: {search_type})."
+            return f"По запросу '{query}'{filter_text} ничего не найдено в документации 1С (коллекция: {collection_name}, поиск: {search_type})."
 
         formatted_results = []
-        filter_text = f" (фильтр по типу: {search_params.object_type})" if search_params.object_type else ""
+        filter_text = f" (фильтр по типу: {object_type})" if object_type else ""
         search_type = "мультивекторный (RRF)" if use_multivector else "обычный"
         formatted_results.append(
-            f"Результаты поиска по запросу: '{search_params.query}'{filter_text} (коллекция: {collection_name}, поиск: {search_type})\n")
+            f"Результаты поиска по запросу: '{query}'{filter_text} (коллекция: {collection_name}, поиск: {search_type})\n")
 
         for i, result in enumerate(results, 1):
             formatted_results.append(
@@ -299,5 +302,5 @@ async def manual_search(request: Request) -> JSONResponse:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host=SERVER_HOST,
+    mcp.run(transport=TRANSPORT_TYPE, host=SERVER_HOST,
             port=SERVER_PORT, log_level="info")

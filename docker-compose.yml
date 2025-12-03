@@ -62,17 +62,43 @@ services:
     build: ./mcp
     container_name: mcp-server
     ports:
-      - "8001:8000"
+      - "8001:8001"
     environment:
       - EMBEDDING_SERVICE_URL=http://embedding-service:5000
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      - SERVER_PORT=8000
+      - SERVER_PORT=8001
+      - TRANSPORT_TYPE=streamable-http
     depends_on:
       - qdrant
       - embedding-service
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://mcp-server:8000/health" ]
+      test: [ "CMD", "curl", "-f", "http://mcp-server:8001/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+  # MCP RAG сервер (SSE)
+  mcp-server-sse:
+    build: ./mcp
+    container_name: mcp-server-sse
+    ports:
+      - "8012:8012"
+    environment:
+      - EMBEDDING_SERVICE_URL=http://embedding-service:5000
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - SERVER_PORT=8012
+      - TRANSPORT_TYPE=sse
+    depends_on:
+      - qdrant
+      - embedding-service
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://mcp-server-sse:8012/health" ]
       interval: 30s
       timeout: 10s
       retries: 5
