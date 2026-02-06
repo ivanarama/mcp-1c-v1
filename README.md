@@ -1,4 +1,5 @@
 # MCP сервер с RAG описанием структуры конфигурации 1С
+[**Этот MCP использован в статье**](https://infostart.ru/1c/articles/2605838).
 
 Демонстрация запуска и использования на Youtube:
 [![Демонстрация запуска и использования MCP сервера для разработки 1С](https://i.ytimg.com/vi/74kYcK6bvGk/sd3.jpg)](http://www.youtube.com/watch?v=74kYcK6bvGk)
