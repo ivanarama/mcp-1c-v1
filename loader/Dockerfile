@@ -20,4 +20,4 @@ COPY . .
 EXPOSE 8501
 
 # Команда запуска
-CMD ["streamlit", "run", "loader.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "loader.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.maxUploadSize=1000"]

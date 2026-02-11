@@ -4,3 +4,4 @@ qdrant-client
 requests
 python-dotenv
 websockets
+httpx

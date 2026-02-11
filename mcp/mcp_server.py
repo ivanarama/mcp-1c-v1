@@ -1,13 +1,18 @@
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
+from starlette.applications import Starlette
+from starlette.routing import Route
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 import json
 import requests
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, Prefetch, FusionQuery, Fusion
 from typing import Dict, Any, List, Literal
 from pydantic import BaseModel, Field
+import uuid
 
 from config import (
     QDRANT_HOST, QDRANT_PORT, COLLECTION_NAME, EMBEDDING_SERVICE_URL,
@@ -17,6 +22,25 @@ from config import (
     OBJECT_NAME_VECTOR, FRIENDLY_NAME_VECTOR, PREFETCH_LIMIT_MULTIPLIER,
     TRANSPORT_TYPE
 )
+
+
+class SessionIdMiddleware(BaseHTTPMiddleware):
+    """Middleware для автоматического добавления mcp-session-id если его нет.
+    Это позволяет MCP клиентам, которые не поддерживают session management,
+    работать с streamable-http транспортом FastMCP.
+    """
+    async def dispatch(self, request: Request, call_next):
+        # Добавляем session-id только для /mcp endpoint если его нет
+        if request.url.path == "/mcp" and "mcp-session-id" not in request.headers:
+            # Генерируем уникальный session-id
+            session_id = str(uuid.uuid4())
+            # Создаём новый запрос с добавленным заголовком
+            request.headers.__dict__["_list"].append(
+                (b"mcp-session-id", session_id.encode())
+            )
+        response = await call_next(request)
+        return response
+
 
 mcp = FastMCP(name=SERVER_NAME)
 
@@ -244,6 +268,224 @@ async def health_check(request: Request) -> JSONResponse:
         return JSONResponse({
             "status": "unhealthy",
             "error": str(e)
+        })
+
+
+@mcp.custom_route("/mcp", methods=["POST"])
+async def mcp_proxy(request: Request) -> JSONResponse:
+    """Proxy endpoint для streamable-http, который автоматически добавляет session-id.
+    Это позволяет MCP клиентам, которые не поддерживают session management, работать.
+    """
+    # Получаем или создаём session-id
+    session_id = request.headers.get("mcp-session-id") or str(uuid.uuid4())
+
+    # Читаем тело запроса
+    body = await request.body()
+
+    # Делаем внутренний запрос к streamable-http endpoint с session-id
+    import httpx
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"http://{SERVER_HOST}:{SERVER_PORT}/mcp",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "mcp-session-id": session_id,
+            },
+            timeout=30.0
+        )
+
+        # Возвращаем ответ
+        return JSONResponse(
+            content=response.json(),
+            status_code=response.status_code,
+            headers={"mcp-session-id": session_id}
+        )
+
+
+def create_sse_response(data: Dict) -> Response:
+    """Создаёт SSE ответ из данных JSON-RPC"""
+    sse_data = json.dumps(data, ensure_ascii=False)
+    return Response(
+        content=f"event: message\ndata: {sse_data}\n\n",
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@mcp.custom_route("/jsonrpc", methods=["GET", "POST"])
+async def simple_jsonrpc(request: Request) -> Response:
+    """Простой HTTP JSON-RPC endpoint для MCP SuperAssistant и других клиентов.
+
+    Этот endpoint принимает стандартные JSON-RPC запросы и возвращает ответы в SSE формате,
+    который ожидает MCP SuperAssistant Proxy при использовании streamable-http типа.
+    """
+    # Обрабатываем GET запросы (handshake)
+    if request.method == "GET":
+        return Response(
+            content="event: endpoint\ndata: /jsonrpc\n\n",
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive"
+            }
+        )
+
+    # Обрабатываем POST запросы
+    try:
+        req_data = await request.json()
+
+        # Проверяем, что это JSON-RPC запрос
+        if not isinstance(req_data, dict):
+            return create_sse_response({
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32600, "message": "Invalid Request"}
+            })
+
+        method = req_data.get("method")
+        req_id = req_data.get("id")
+
+        # Обрабатываем tools/list
+        if method == "tools/list":
+            # Получаем список инструментов из MCP
+            tools = []
+            tools_dict = await mcp.get_tools()  # get_tools возвращает словарь {name: Tool}
+            for tool_name, tool in tools_dict.items():
+                tools.append({
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "inputSchema": tool.inputSchema if hasattr(tool, 'inputSchema') else {
+                        "type": "object",
+                        "properties": {}
+                    }
+                })
+
+            return create_sse_response({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"tools": tools}
+            })
+
+        # Обрабатываем initialize
+        elif method == "initialize":
+            return create_sse_response({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {
+                        "name": SERVER_NAME,
+                        "version": "1.0.0"
+                    },
+                    "capabilities": {
+                        "tools": {}
+                    }
+                }
+            })
+
+        # Обрабатываем tools/call
+        elif method == "tools/call":
+            params = req_data.get("params", {})
+            name = params.get("name")
+            arguments = params.get("arguments", {})
+
+            # Вызываем инструмент через FastMCP
+            try:
+                # Получаем все инструменты и ищем нужный
+                tools_dict = await mcp.get_tools()
+                if name in tools_dict:
+                    tool = tools_dict[name]
+                    # У FunctionTool есть атрибут fn - это реальная функция
+                    if hasattr(tool, 'fn') and callable(tool.fn):
+                        result = tool.fn(**arguments)
+                        return create_sse_response({
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": {"content": [{"type": "text", "text": str(result)}]}
+                        })
+                    else:
+                        return create_sse_response({
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": {"code": -32603, "message": f"Tool {name} is not callable"}
+                        })
+                else:
+                    return create_sse_response({
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32601, "message": f"Tool not found: {name}"}
+                    })
+            except Exception as e:
+                return create_sse_response({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32603, "message": f"Tool execution error: {str(e)}"}
+                })
+
+        # Метод ping для health check
+        elif method == "ping":
+            return create_sse_response({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"status": "ok"}
+            })
+
+        # Обрабатываем уведомления (notifications) - это запросы без id или с method начинающимся с notifications/
+        elif method and method.startswith("notifications/"):
+            # Уведомления не требуют ответа с result, возвращаем пустой успешный ответ
+            if req_id is not None:
+                return create_sse_response({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {}
+                })
+            else:
+                # Для уведомлений без id возвращаем пустой SSE ответ
+                return Response(
+                    content=": \n\n",
+                    media_type="text/event-stream"
+                )
+
+        # Обрабатываем resources/list (пустой список, ресурсов нет)
+        elif method == "resources/list":
+            return create_sse_response({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"resources": []}
+            })
+
+        # Обрабатываем prompts/list (пустой список, промптов нет)
+        elif method == "prompts/list":
+            return create_sse_response({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"prompts": []}
+            })
+
+        else:
+            return create_sse_response({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32601, "message": f"Method not found: {method}"}
+            })
+
+    except json.JSONDecodeError:
+        return create_sse_response({
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {"code": -32700, "message": "Parse error"}
+        })
+    except Exception as e:
+        return create_sse_response({
+            "jsonrpc": "2.0",
+            "id": req_data.get("id") if 'req_data' in locals() else None,
+            "error": {"code": -32603, "message": f"Internal error: {str(e)}"}
         })
 
 
