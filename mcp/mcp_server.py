@@ -1,10 +1,8 @@
 from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_http_headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.applications import Starlette
 from starlette.routing import Route
-from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 import json
 import requests
@@ -24,22 +22,28 @@ from config import (
 )
 
 
-class SessionIdMiddleware(BaseHTTPMiddleware):
-    """Middleware для автоматического добавления mcp-session-id если его нет.
-    Это позволяет MCP клиентам, которые не поддерживают session management,
-    работать с streamable-http транспортом FastMCP.
-    """
+# Глобальная переменная для хранения request из middleware (для доступа в tools)
+_current_request: Request = None
+
+
+class RequestContextMiddleware(BaseHTTPMiddleware):
+    """Middleware для сохранения текущего request в контексте."""
     async def dispatch(self, request: Request, call_next):
-        # Добавляем session-id только для /mcp endpoint если его нет
-        if request.url.path == "/mcp" and "mcp-session-id" not in request.headers:
-            # Генерируем уникальный session-id
-            session_id = str(uuid.uuid4())
-            # Создаём новый запрос с добавленным заголовком
-            request.headers.__dict__["_list"].append(
-                (b"mcp-session-id", session_id.encode())
-            )
-        response = await call_next(request)
-        return response
+        global _current_request
+        _current_request = request
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            _current_request = None
+
+
+def get_collection_from_header() -> str | None:
+    """Получает x-collection-name из заголовков текущего запроса."""
+    global _current_request
+    if _current_request:
+        return _current_request.headers.get("x-collection-name")
+    return None
 
 
 mcp = FastMCP(name=SERVER_NAME)
@@ -187,14 +191,10 @@ def search_1c_documentation(query: str, object_type: str = None, limit: int = DE
     """
     try:
 
-        headers = get_http_headers()
         # Определяем имя коллекции по приоритету:
-        # 1. Из HTTP-заголовка x-collection-name
+        # 1. Из HTTP-заголовка x-collection-name (через middleware)
         # 2. Значение по умолчанию из конфигурации
-        collection_name = (
-            headers.get("x-collection-name") or
-            COLLECTION_NAME
-        )
+        collection_name = get_collection_from_header() or COLLECTION_NAME
 
         # Проверяем, что коллекция существует
         if not qdrant_client.collection_exists(collection_name):
@@ -269,39 +269,6 @@ async def health_check(request: Request) -> JSONResponse:
             "status": "unhealthy",
             "error": str(e)
         })
-
-
-@mcp.custom_route("/mcp", methods=["POST"])
-async def mcp_proxy(request: Request) -> JSONResponse:
-    """Proxy endpoint для streamable-http, который автоматически добавляет session-id.
-    Это позволяет MCP клиентам, которые не поддерживают session management, работать.
-    """
-    # Получаем или создаём session-id
-    session_id = request.headers.get("mcp-session-id") or str(uuid.uuid4())
-
-    # Читаем тело запроса
-    body = await request.body()
-
-    # Делаем внутренний запрос к streamable-http endpoint с session-id
-    import httpx
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"http://{SERVER_HOST}:{SERVER_PORT}/mcp",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream",
-                "mcp-session-id": session_id,
-            },
-            timeout=30.0
-        )
-
-        # Возвращаем ответ
-        return JSONResponse(
-            content=response.json(),
-            status_code=response.status_code,
-            headers={"mcp-session-id": session_id}
-        )
 
 
 def create_sse_response(data: Dict) -> Response:
@@ -395,38 +362,45 @@ async def simple_jsonrpc(request: Request) -> Response:
             name = params.get("name")
             arguments = params.get("arguments", {})
 
-            # Вызываем инструмент через FastMCP
+            # Сохраняем request в глобальной переменной для доступа в tool
+            global _current_request
+            _current_request = request
+
             try:
-                # Получаем все инструменты и ищем нужный
-                tools_dict = await mcp.get_tools()
-                if name in tools_dict:
-                    tool = tools_dict[name]
-                    # У FunctionTool есть атрибут fn - это реальная функция
-                    if hasattr(tool, 'fn') and callable(tool.fn):
-                        result = tool.fn(**arguments)
-                        return create_sse_response({
-                            "jsonrpc": "2.0",
-                            "id": req_id,
-                            "result": {"content": [{"type": "text", "text": str(result)}]}
-                        })
+                # Вызываем инструмент через FastMCP
+                try:
+                    # Получаем все инструменты и ищем нужный
+                    tools_dict = await mcp.get_tools()
+                    if name in tools_dict:
+                        tool = tools_dict[name]
+                        # У FunctionTool есть атрибут fn - это реальная функция
+                        if hasattr(tool, 'fn') and callable(tool.fn):
+                            result = tool.fn(**arguments)
+                            return create_sse_response({
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "result": {"content": [{"type": "text", "text": str(result)}]}
+                            })
+                        else:
+                            return create_sse_response({
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "error": {"code": -32603, "message": f"Tool {name} is not callable"}
+                            })
                     else:
                         return create_sse_response({
                             "jsonrpc": "2.0",
                             "id": req_id,
-                            "error": {"code": -32603, "message": f"Tool {name} is not callable"}
+                            "error": {"code": -32601, "message": f"Tool not found: {name}"}
                         })
-                else:
+                except Exception as e:
                     return create_sse_response({
                         "jsonrpc": "2.0",
                         "id": req_id,
-                        "error": {"code": -32601, "message": f"Tool not found: {name}"}
+                        "error": {"code": -32603, "message": f"Tool execution error: {str(e)}"}
                     })
-            except Exception as e:
-                return create_sse_response({
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {"code": -32603, "message": f"Tool execution error: {str(e)}"}
-                })
+            finally:
+                _current_request = None  # Очищаем в любом случае
 
         # Метод ping для health check
         elif method == "ping":
@@ -544,5 +518,7 @@ async def manual_search(request: Request) -> JSONResponse:
 
 
 if __name__ == "__main__":
+    # Добавляем middleware для доступа к HTTP заголовкам в tools
+    mcp.app.add_middleware(RequestContextMiddleware)
     mcp.run(transport=TRANSPORT_TYPE, host=SERVER_HOST,
             port=SERVER_PORT, log_level="info")
