@@ -129,6 +129,17 @@ mcp-1c-v1/
     }
 }
 ```
+
+**Для Codex .../YourProject/.codex/config.toml**
+```toml
+[mcp_servers.my-1c-mcp]
+enabled = true
+url = "http://192.168.1.13:8001/mcp-auto"
+
+[mcp_servers.my-1c-mcp.http_headers]
+x-collection-name = "1c_rag"
+```
+
 Через заголовок `x-collection-name` можно указать имя коллекции в Qdrant вместо дефолтного `1c_rag`. Т.к. настройки MCP почти везде можно указывать на уровне проекта, то это позволяет один и тот же инстанс MCP сервера использовать для разных проектов с разными коллекциями (для разных конфигураций 1С).
 
 ## Переменные окружения
