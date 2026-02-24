@@ -1,8 +1,7 @@
 FROM python:3.11-slim
 
-# Установка системных зависимостей
-RUN apt-get update && apt-get install -y \
-    build-essential \
+# Установка системных зависимостей (минимум для streamlit)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -11,7 +10,12 @@ WORKDIR /app
 
 # Копирование requirements.txt и установка зависимостей
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Pip optimizations
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_PYTHON_VERSION_WARNING=1 \
+    PIP_PREFER_BINARY=1
+RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
 
 # Копирование исходного кода
 COPY . .
