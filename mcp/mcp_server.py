@@ -241,7 +241,7 @@ def rag_search(query: str, collection_name: str, object_type: str = None, limit:
         raise Exception(f"Ошибка поиска в документации: {str(e)}")
 
 
-@mcp.tool
+@mcp.tool()
 def search_1c_documentation(query: str, object_type: str = None, limit: int = DEFAULT_SEARCH_LIMIT) -> str:
     """Поиск описания объектов конфигурации 1С Предприятие 8 в документации.
 
