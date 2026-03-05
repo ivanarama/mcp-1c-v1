@@ -633,24 +633,34 @@ class MCPAutoTransportAdapter:
                 return _jsonrpc_error(-32602, "Invalid params: arguments must be an object", req_id)
 
             try:
-                tool_result = await mcp.call_tool(tool_name, arguments)
+                # Получаем инструменты и вызываем напрямую
+                tools_dict = await mcp.get_tools()
+                if tool_name not in tools_dict:
+                    return _jsonrpc_error(-32601, f"Tool not found: {tool_name}", req_id)
+
+                tool = tools_dict[tool_name]
+
+                # Сохраняем request для доступа к заголовкам внутри tool
+                _current_request_ctx.set(self.request)
+                _current_request = self.request
+
+                # Вызываем функцию инструмента
+                if hasattr(tool, 'fn') and callable(tool.fn):
+                    result = tool.fn(**arguments)
+                    # Формируем ответ в формате MCP
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": {"content": [{"type": "text", "text": str(result)}]}
+                    }
+                else:
+                    return _jsonrpc_error(-32603, f"Tool {tool_name} is not callable", req_id)
+
             except Exception as e:
                 return _jsonrpc_error(-32603, f"Tool execution error: {str(e)}", req_id)
-
-            content_items = []
-            for item in getattr(tool_result, "content", []) or []:
-                if hasattr(item, "model_dump"):
-                    content_items.append(item.model_dump(exclude_none=True))
-                elif isinstance(item, dict):
-                    content_items.append(item)
-                else:
-                    content_items.append({"type": "text", "text": str(item)})
-
-            result_payload: Dict[str, Any] = {"content": content_items}
-            if hasattr(tool_result, "isError"):
-                result_payload["isError"] = bool(getattr(tool_result, "isError"))
-
-            return {"jsonrpc": "2.0", "id": req_id, "result": result_payload}
+            finally:
+                _current_request_ctx.set(None)
+                _current_request = None
 
         if method == "resources/templates/list":
             if not self.session.initialized:
