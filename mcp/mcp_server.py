@@ -573,7 +573,7 @@ class MCPAutoTransportAdapter:
             return {"jsonrpc": "2.0", "id": req_id, "result": {"resources": []}}
 
         if method == "tools/list":
-            tools_list = await mcp.list_tools()
+            tools_list = list(mcp._tool_manager._tools.values())
             tools = []
             tool_schemas = {
                 "search_1c_documentation": {
@@ -634,7 +634,7 @@ class MCPAutoTransportAdapter:
 
             try:
                 # Получаем инструменты и вызываем напрямую
-                tools_dict = await mcp.get_tools()
+                tools_dict = mcp._tool_manager._tools
                 if tool_name not in tools_dict:
                     return _jsonrpc_error(-32601, f"Tool not found: {tool_name}", req_id)
 
@@ -779,7 +779,7 @@ class MCPSSEStream:
                 _current_request_ctx.set(self.request)
 
             try:
-                tools_dict = await mcp.get_tools()
+                tools_dict = mcp._tool_manager._tools
                 if name in tools_dict:
                     tool = tools_dict[name]
                     if hasattr(tool, 'fn') and callable(tool.fn):
@@ -1261,7 +1261,7 @@ async def simple_jsonrpc(request: Request) -> Response:
                 # Вызываем инструмент через FastMCP
                 try:
                     # Получаем все инструменты и ищем нужный
-                    tools_dict = await mcp.get_tools()
+                    tools_dict = mcp._tool_manager._tools
                     if name in tools_dict:
                         tool = tools_dict[name]
                         # У FunctionTool есть атрибут fn - это реальная функция
