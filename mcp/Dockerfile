@@ -14,7 +14,7 @@ COPY requirements.txt .
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_PYTHON_VERSION_WARNING=1 \
     PIP_PREFER_BINARY=1
-RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
+RUN pip install --no-cache-dir --prefer-binary --index-url https://pypi.org/simple -r requirements.txt
 
 # Copy application code
 COPY . .
